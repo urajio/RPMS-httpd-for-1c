@@ -6,8 +6,9 @@
 
 Summary: Apache HTTP Server
 Name: httpd
+Epoch: 22
 Version: 2.2.15
-Release: 39%{?dist}
+Release: 39.3%{?dist}
 URL: http://httpd.apache.org/
 Source0: http://www.apache.org/dist/httpd/httpd-%{version}.tar.gz
 Source1: centos_index.html
@@ -22,6 +23,8 @@ Source14: htcacheclean.init
 Source15: htcacheclean.sysconf
 # Documentation
 Source33: README.confd
+# Backports from 2.4
+Source50: httpd.tmpfiles
 # build/scripts patches
 Patch1: httpd-2.1.10-apctl.patch
 Patch2: httpd-2.1.10-apxs.patch
@@ -120,6 +123,8 @@ Patch214: httpd-2.2.15-CVE-2014-0098.patch
 Patch215: httpd-2.2.15-CVE-2014-0231.patch
 Patch216: httpd-2.2.15-CVE-2014-0118.patch
 Patch217: httpd-2.2.15-CVE-2014-0226.patch
+# 1C patches
+Patch300: httpd-1c-util_pcre.patch
 License: ASL 2.0
 Group: System Environment/Daemons
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -131,12 +136,13 @@ Obsoletes: httpd-suexec
 Requires(pre): /usr/sbin/useradd
 Requires(post): chkconfig
 Provides: webserver
-Provides: mod_dav = %{version}-%{release}, httpd-suexec = %{version}-%{release}
+Provides: mod_dav = 22:%{version}-%{release}, httpd-suexec = 22:%{version}-%{release}
 Provides: httpd-mmn = %{mmn}
 Obsoletes: apache, secureweb, mod_dav, mod_gzip, stronghold-apache
 Obsoletes: stronghold-htdocs, mod_put, mod_roaming
 Conflicts: pcre < 4.0
-Requires: httpd-tools = %{version}-%{release}, apr-util-ldap
+Conflicts: httpd < 22:
+Requires: httpd-tools = 22:%{version}-%{release}, apr-util
 
 %description
 The Apache HTTP Server is a powerful, efficient, and extensible
@@ -147,7 +153,7 @@ Group: Development/Libraries
 Summary: Development interfaces for the Apache HTTP server
 Obsoletes: secureweb-devel, apache-devel, stronghold-apache-devel
 Requires: apr-devel, apr-util-devel, pkgconfig
-Requires: httpd = %{version}-%{release}
+Requires: httpd = 22:%{version}-%{release}
 
 %description devel
 The httpd-devel package contains the APXS binary and other files
@@ -161,7 +167,7 @@ to install this package.
 %package manual
 Group: Documentation
 Summary: Documentation for the Apache HTTP server
-Requires: httpd = %{version}-%{release}
+Requires: httpd = 22:%{version}-%{release}
 Obsoletes: secureweb-manual, apache-manual
 BuildArch: noarch
 
@@ -181,11 +187,11 @@ the Apache HTTP Server.
 %package -n mod_ssl
 Group: System Environment/Daemons
 Summary: SSL/TLS module for the Apache HTTP Server
-Epoch: 1
+Epoch: 22
 BuildRequires: openssl-devel
 Requires(post): openssl >= 0.9.7f-4, /bin/cat
 Requires(pre): httpd
-Requires: httpd = 0:%{version}-%{release}, httpd-mmn = %{mmn}
+Requires: httpd = 22:%{version}-%{release}, httpd-mmn = %{mmn}
 Obsoletes: stronghold-mod_ssl
 
 %description -n mod_ssl
@@ -292,6 +298,8 @@ Security (TLS) protocols.
 %patch215 -p1 -b .cve0231
 %patch216 -p1 -b .cve0118
 %patch217 -p1 -b .cve0226
+
+%patch300 -p1 -b .1c-pcre
 
 # Patch in vendor/release string
 sed "s/@VENDOR@/%{vstring}/;s/@RELEASE@/%{release}/" < %{PATCH20} | patch -p1 -b -z .release
@@ -411,8 +419,9 @@ install -m 644 -p $RPM_SOURCE_DIR/httpd.sysconf \
 install -m 644 -p $RPM_SOURCE_DIR/htcacheclean.sysconf \
    $RPM_BUILD_ROOT%{_sysconfdir}/sysconfig/htcacheclean
 
-# for holding mod_dav lock database
-mkdir -p $RPM_BUILD_ROOT%{_localstatedir}/lib/dav
+# Other directories
+mkdir -p $RPM_BUILD_ROOT%{_localstatedir}/lib/dav \
+         $RPM_BUILD_ROOT/run/httpd/htcacheclean
 
 # create a prototype session cache
 mkdir -p $RPM_BUILD_ROOT%{_localstatedir}/cache/mod_ssl
@@ -452,14 +461,18 @@ set -x
 ln -s ../../..%{_datadir}/pixmaps/poweredby.png \
         $RPM_BUILD_ROOT%{contentdir}/icons/poweredby.png
 
+# tmpfiles.d configuration
+mkdir -p $RPM_BUILD_ROOT%{_prefix}/lib/tmpfiles.d 
+install -m644 -p $RPM_SOURCE_DIR/httpd.tmpfiles \
+	$RPM_BUILD_ROOT%{_prefix}/lib/tmpfiles.d/httpd.conf
+
 # Set up /var directories
 rmdir $RPM_BUILD_ROOT%{_sysconfdir}/httpd/logs
 mkdir -p $RPM_BUILD_ROOT%{_localstatedir}/log/httpd
-mkdir -p $RPM_BUILD_ROOT%{_localstatedir}/run/httpd
 
 # symlinks for /etc/httpd
 ln -s ../..%{_localstatedir}/log/httpd $RPM_BUILD_ROOT/etc/httpd/logs
-ln -s ../..%{_localstatedir}/run/httpd $RPM_BUILD_ROOT/etc/httpd/run
+ln -s /run/httpd $RPM_BUILD_ROOT/etc/httpd/run
 ln -s ../..%{_libdir}/httpd/modules $RPM_BUILD_ROOT/etc/httpd/modules
 
 # install SYSV init stuff
@@ -480,7 +493,7 @@ sed -e "s|/usr/local/apache2/conf/httpd.conf|/etc/httpd/conf/httpd.conf|" \
     -e "s|/usr/local/apache2/conf/magic|/etc/httpd/conf/magic|" \
     -e "s|/usr/local/apache2/logs/error_log|/var/log/httpd/error_log|" \
     -e "s|/usr/local/apache2/logs/access_log|/var/log/httpd/access_log|" \
-    -e "s|/usr/local/apache2/logs/httpd.pid|/var/run/httpd/httpd.pid|" \
+    -e "s|/usr/local/apache2/logs/httpd.pid|/run/httpd/httpd.pid|" \
     -e "s|/usr/local/apache2|/etc/httpd|" < docs/man/httpd.8 \
   > $RPM_BUILD_ROOT%{_mandir}/man8/httpd.8
 
@@ -608,6 +621,7 @@ rm -rf $RPM_BUILD_ROOT
 
 %config(noreplace) %{_sysconfdir}/sysconfig/httpd
 %config(noreplace) %{_sysconfdir}/sysconfig/htcacheclean
+%{_prefix}/lib/tmpfiles.d/httpd.conf
 
 %{_sbindir}/ht*
 %{_sbindir}/apachectl
@@ -631,7 +645,8 @@ rm -rf $RPM_BUILD_ROOT
 %config %{contentdir}/error/*.var
 %config %{contentdir}/error/include/*.html
 
-%attr(0710,root,apache) %dir %{_localstatedir}/run/httpd
+%attr(0710,root,apache) %dir /run/httpd
+%attr(0700,apache,apache) %dir /run/httpd/htcacheclean
 %attr(0700,root,root) %dir %{_localstatedir}/log/httpd
 %attr(0700,apache,apache) %dir %{_localstatedir}/lib/dav
 %attr(0700,apache,apache) %dir %{_localstatedir}/cache/mod_proxy
